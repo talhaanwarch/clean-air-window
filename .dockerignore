@@ -1,0 +1,6 @@
+.env
+.venv
+.git
+__pycache__
+data/guidance-index.npz
+docs

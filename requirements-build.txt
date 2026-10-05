@@ -1,0 +1,4 @@
+# Only for scripts/build_guidance.py, which refreshes data/guidance/.
+-r requirements.txt
+pypdf==6.19.0
+trafilatura==2.3.0
