@@ -61,16 +61,14 @@ streamlit run app.py
 
 Run the setup script once per AcruxCore team. It is safe to run again: an unchanged tool or prompt is left alone, and a changed prompt becomes a new version that is not promoted.
 
-Open http://localhost:8501. The first plan takes about 20 seconds longer than the rest, because the app builds the guidance index once and caches it in `data/guidance-index.npz`.
+Open http://localhost:8501. The guidance index ships prebuilt in `data/guidance-index.npz`. The app rebuilds it only when the guidance text or `EMBED_MODEL` changes.
 
 ### With Docker
 
 ```bash
 docker build -t clean-air-window .
-docker run --rm -p 8501:8501 --env-file .env -v caw-cache:/cache clean-air-window
+docker run --rm -p 8501:8501 --env-file .env clean-air-window
 ```
-
-The `caw-cache` volume keeps the guidance index between restarts.
 
 ## Settings
 
