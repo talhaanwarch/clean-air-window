@@ -1,7 +1,7 @@
-"""The two tools the agent can call.
+"""The three tools the agent can call.
 
 `@acrux.tool` builds each tool's JSON schema from the signature and docstring,
-and the first run registers both in the AcruxCore tool catalog. The functions
+and the first run registers each one in the AcruxCore tool catalog. The functions
 still run here, in this process: the catalog owns the definition the model
 reads, and every call shows up as a tool span in the trace.
 """
@@ -12,9 +12,11 @@ import time
 from functools import lru_cache
 
 import acruxcore as acrux
+import httpx
 
 from .guidance import GuidanceIndex
 from .open_meteo import DayOutlook, aqi_category, fetch_day, rank_windows
+from .serpapi_news import recent_air_news
 
 _OUTLOOK_TTL_SECONDS = 15 * 60
 
@@ -73,3 +75,21 @@ async def search_health_guidance(query: str) -> str:
     """
     hits = guidance_index().search(query, k=4)
     return "\n\n".join(f"[{i}] {chunk.title} ({chunk.url})\n{chunk.text}" for i, (chunk, _) in enumerate(hits, 1))
+
+
+@acrux.tool
+async def get_local_air_news(city: str) -> dict:
+    """Get the last seven days of news headlines about air quality and smog in a city,
+    newest first, such as official smog alerts or school closures. Use them only if a
+    headline changes what the person should do today; many cities have none.
+
+    Args:
+        city: City name, for example 'Lahore'.
+    """
+    try:
+        return {"city": city, "headlines": recent_air_news(city)}
+    except (RuntimeError, httpx.HTTPError):
+        # No key, or SerpApi refused (for example, the monthly quota is spent). The
+        # error text is not passed on: an httpx error message carries the request
+        # URL, and that URL holds the API key.
+        return {"city": city, "headlines": [], "unavailable": "news search is unavailable right now"}

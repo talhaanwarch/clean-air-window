@@ -6,7 +6,10 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
+import difflib
 import json
+import threading
 import uuid
 
 import acruxcore as acrux
@@ -33,6 +36,7 @@ SENSITIVE_GROUPS = ["asthma or lung disease", "heart disease", "child or teenage
 TOOL_LABELS = {
     "get_air_and_weather": "Checking today's air quality and weather",
     "search_health_guidance": "Reading the EPA health guidance",
+    "get_local_air_news": "Checking this week's local air news",
 }
 
 st.set_page_config(page_title="Clean Air Window", page_icon="🌿", layout="centered")
@@ -127,18 +131,47 @@ def show_plan(result: dict, verdict_slot, chart_slot) -> None:
     chart_slot.altair_chart(aqi_chart(data, best, result["free_from"], result["free_until"]), width="stretch")
 
 
-def answer_markdown(answer: PlanAnswer) -> str:
-    """The model's typed answer as three labelled paragraphs, with the source linked."""
+def answer_markdown(answer: PlanAnswer, headlines: list[dict]) -> str:
+    """The model's typed answer as labelled paragraphs, with the guidance and the news linked.
+
+    A headline is linked only when its title matches one the news tool returned, so
+    the page never shows a link the model made up.
+    """
     source = find_source(answer.source_title)
     cite = f"[{source[0]}]({source[1]})" if source else answer.source_title
-    return f"**Why this time:** {answer.why}\n\n**For you:** {answer.for_you} *Source: {cite}*\n\n**Tip:** {answer.tip}"
+    parts = [f"**Why this time:** {answer.why}", f"**For you:** {answer.for_you} *Source: {cite}*", f"**Tip:** {answer.tip}"]
+    if answer.local_news.strip():
+        titles = {h["title"]: h for h in headlines}
+        match = difflib.get_close_matches(answer.news_title, list(titles), n=1, cutoff=0.6)
+        link = f" *[{match[0]}]({titles[match[0]]['link']})*" if match else ""
+        parts.append(f"**Local news:** {answer.local_news}{link}")
+    return "\n\n".join(parts)
+
+
+@st.cache_resource
+def daily_counter() -> dict:
+    """Plans made today by every visitor of this server process."""
+    return {"day": None, "count": 0, "lock": threading.Lock()}
+
+
+def take_daily_slot() -> bool:
+    """Count one plan against the server's daily cap; False when the cap is reached."""
+    counter = daily_counter()
+    with counter["lock"]:
+        today = datetime.date.today()
+        if counter["day"] != today:
+            counter["day"], counter["count"] = today, 0
+        if counter["count"] >= config.DAILY_PLAN_LIMIT:
+            return False
+        counter["count"] += 1
+        return True
 
 
 async def run(request: PlanRequest) -> None:
     """Stream one plan into the page and keep it in session state for later reruns."""
     status = st.status("Planning…", expanded=False)
     verdict_slot, chart_slot, text_slot = st.empty(), st.empty(), st.empty()
-    result = {"free_from": request.free_from_hour, "free_until": request.free_until_hour, "text": ""}
+    result = {"free_from": request.free_from_hour, "free_until": request.free_until_hour, "text": "", "headlines": []}
     async for event in plan(request, session_id=st.session_state.session_id):
         if event.type == "tool_call":
             status.update(label=TOOL_LABELS.get(event.name, event.name) + "…")
@@ -146,19 +179,27 @@ async def run(request: PlanRequest) -> None:
         elif event.type == "tool_result" and event.name == "get_air_and_weather" and not event.error:
             result["data"] = event.result
             show_plan(result, verdict_slot, chart_slot)
+        elif event.type == "tool_result" and event.name == "get_local_air_news" and not event.error:
+            result["headlines"] = event.result.get("headlines", [])
         elif event.type == "content" and not result["text"]:
             # The answer arrives as JSON; show progress, not half-written braces.
             status.update(label="Writing your plan…")
             result["text"] = " "
         elif event.type == "done":
             result["trace_id"] = event.result.trace_id
-            result["text"] = answer_markdown(PlanAnswer.model_validate(json.loads(event.result.content)))
+            result["text"] = answer_markdown(PlanAnswer.model_validate(json.loads(event.result.content)), result["headlines"])
             text_slot.markdown(result["text"])
             status.update(label=f"Done in {event.result.iterations} model calls", state="complete")
     st.session_state.result = result
 
 
-if submitted:
+plans_made = st.session_state.get("plans_made", 0)
+if submitted and plans_made >= config.SESSION_PLAN_LIMIT:
+    st.warning(f"This demo allows {config.SESSION_PLAN_LIMIT} plans per visit. Reload the page later to plan again.")
+elif submitted and not take_daily_slot():
+    st.warning("This demo has reached its plan limit for today. Please come back tomorrow.")
+elif submitted:
+    st.session_state.plans_made = plans_made + 1
     request = PlanRequest(city, activity, duration, free[0], free[1], groups)
     st.session_state.pop("result", None)
     st.session_state.pop("feedback_sent", None)
