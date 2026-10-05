@@ -2,7 +2,7 @@
 
 Clean Air Window tells you the cleanest time to go outside today. You give it your city, your activity, the hours you are free, and whether you are in a sensitive group such as people with asthma. It answers with one time window, an hourly air-quality chart, advice taken from the U.S. EPA's health guidance, and any local air-quality news from this week that changes the plan.
 
-<!-- LIVE_DEMO -->
+**Live app:** [clean-air-window.onrender.com](https://clean-air-window.onrender.com), on Render.
 
 ![Demo: planning a walk in Lahore, then the same run as a trace in AcruxCore](docs/images/demo.gif)
 
